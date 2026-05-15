@@ -18,6 +18,11 @@
 /* 本地定义 */
 #include "scmi_defs.h"
 #include "scmi_doorbell.h"
+#include "scmi_clock.h"
+#include "scmi_power.h"
+#include "scmi_perf.h"
+#include "scmi_i2c.h"
+#include "scmi_spi.h"
 
 /* ==================== 寄存器定义 ==================== */
 
@@ -167,11 +172,20 @@ void scmi_core_init(void)
                                   uint8_t *out, size_t *out_len);
     scmi_register_handler(SCMI_BASE_PROTO_ID, scmi_base_handler, NULL);
 
-    /* 注册其他 protocol handlers */
-    extern int scmi_clock_handler(uint32_t proto, uint32_t msg_id,
-                                   const uint8_t *in, size_t in_len,
-                                   uint8_t *out, size_t *out_len);
+    /* 注册 Clock protocol handler */
     scmi_register_handler(0x11, scmi_clock_handler, NULL);
+
+    /* 注册 Power protocol handler */
+    scmi_register_handler(0x12, scmi_power_handler, NULL);
+
+    /* 注册 Perf protocol handler */
+    scmi_register_handler(0x13, scmi_perf_handler, NULL);
+
+    /* 注册 I2C protocol handler */
+    scmi_register_handler(0x16, scmi_i2c_handler, NULL);
+
+    /* 注册 SPI protocol handler */
+    scmi_register_handler(0x17, scmi_spi_handler, NULL);
 
     /* 启用 doorbell 中断路由到 EL3 FIQ */
     /* gicv3_enable_sgi(SCMI_DOORBELL_SGI, SECURE); */
