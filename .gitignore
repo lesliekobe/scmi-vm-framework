@@ -1,0 +1,50 @@
+# .gitignore
+*.o
+*.d
+*.ko
+*.mod.c
+*.order
+*.symvers
+*.mod
+
+# Build artifacts
+*.a
+*.so
+*.out
+uart_log_tool
+
+# Linux kernel build
+*.cmd
+Module.symvers
+modules.order
+.tmp_versions/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+*.swp
+*~
+
+# STM32CubeMX
+*.ioc
+Core/Src/subdir.mk
+Core/Inc/subdir.mk
+Drivers/CMSIS/Device/
+Drivers/STM32F4xx_HAL_Driver/Src/
+
+# Documentation
+docs/*.pdf
+docs/*.html
+
+# Bootloader / Firmware
+mygearvm/build/
+mygearvm/*.elf
+mygearvm/*.bin
+
+# QNX
+*.pinfo
+*.rpo
+x86/
