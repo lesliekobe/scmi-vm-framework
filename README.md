@@ -7,9 +7,15 @@ ARM SCMI 跨虚拟机通信框架：pvm (Linux) ↔ mygearvm (ARM Trusted Firmwa
 ```
                     ┌─────────────────────┐
                     │   Android Guest VM   │
-                    │  (virtio-scmi driver)│
+                    │  (scmi_i2c_adapter)  │
+                    │  (scmi_spi_adapter)  │
                     └──────────┬──────────┘
-                               │ virtio-scmi (shared memory + virtqueue)
+                               │ scmi_client
+                    ┌──────────┴──────────┐
+                    │  virtio-scmi driver │
+                    │  (virtqueue A2P/P2A)│
+                    └──────────┬──────────┘
+                               │ virtio-scmi
                     ┌──────────┴──────────┐
                     │   Linux PVM (Host)   │
                     │  ┌───────────────┐  │
@@ -17,18 +23,20 @@ ARM SCMI 跨虚拟机通信框架：pvm (Linux) ↔ mygearvm (ARM Trusted Firmwa
                     │  └───────┬───────┘  │
                     │     ┌────┴────┐     │
                     │     │ doorbell│     │
-                    │     │ (scmi-xlnx)│   │
+                    │     │ (scmi-xlnx)│  │
                     └──┬──┴─────────┴──┬──┘
                        │                │
             ┌───────────┘                └───────────┐
-            │ ARM scmi门铃 (内存共享+中断)          │  virtio-scmi (virtqueue)
+            │ ARM scmi门铃 (内存共享+中断)          │
             │                                     │
-┌───────────┴───────────┐              ┌───────────┴───────────┐
-│   mygearvm (TF-A)     │              │   (future: 其他Guest) │
-│  ┌─────────────────┐  │              └────────────────────────┘
-│  │ scmi-firmware  │
-│  │ (platform/MCP) │
-│  └─────────────────┘  │
+┌───────────┴───────────┐
+│   mygearvm (TF-A)     │
+│  ┌─────────────────┐ │
+│  │ scmi-firmware   │ │
+│  │ Base/Clock/     │ │
+│  │ Power/Perf/     │ │
+│  │ I2C/SPI server  │ │
+│  └─────────────────┘ │
 └──────────────────────┘
 ```
 
@@ -40,42 +48,24 @@ ARM SCMI 跨虚拟机通信框架：pvm (Linux) ↔ mygearvm (ARM Trusted Firmwa
 | PVM Linux SCMI | `pvm/linux/drivers/scmi/` | Linux 端 SCMI 驱动 |
 | Doorbell 驱动 | `pvm/linux/drivers/scmi/doorbell/` | scmi-xlnx 风格 doorbell |
 | mygearvm Core | `mygearvm/core/` | ARM Trusted Firmware 核心 |
-| mygearvm Firmware | `mygearvm/firmware/` | SCMI Server (platform/scmi) |
-| Android virtio-scmi | `android/virtio-scmi/` | virtio-scmi guest 驱动 |
-
-## 通信通道
-
-### 1. pvm ↔ mygearvm (Doorbell / scmi-xlnx)
-
-```
-[Linux PVM]  ───共享内存 (SCMI_SHM) ───► [mygearvm]
-              ████████████████████
-              ◄─── doorbell中断 ─────
-```
-
-- 共享内存区域：SCMI message + response buffer
-- 触发方式：写 doorbell register (GPFR_EL3 or hypervisor trap)
-- 典型实现：Xilinx ZynqMP scmi-xlnx 驱动
-
-### 2. pvm ↔ Android (virtio-scmi)
-
-```
-[Android]  ───virtqueue (TX/RX) ───► [Linux PVM]
-            ◄─── virtio中断 ─────────
-```
-
-- 标准 virtio-scmi 设备（virtio 1.1+，支持packed virtqueue）
-- Android 为 virtio guest，Linux 为 virtio host
+| mygearvm Firmware | `mygearvm/firmware/` | SCMI Server 实现 (Base/Clock/Power/Perf/I2C/SPI) |
+| Android SCMI Client | `android/virtio-scmi/scmi_client/` | SCMI 客户端库 (同步事务、token管理) |
+| Android virtio-scmi | `android/virtio-scmi/` | virtio-scmi guest 驱动 (transport层) |
+| Android I2C Adapter | `android/drivers/i2c/` | Linux I2C 子系统适配器，通过 SCMI Clock+I2C |
+| Android SPI Adapter | `android/drivers/spi/` | Linux SPI 子系统适配器，通过 SCMI Clock+SPI |
 
 ## SCMI 协议支持
 
-- [x] SCMI Base Protocol (必选)
-- [ ] SCMI Clock Protocol
-- [ ] SCMI Reset Domain Protocol
-- [ ] SCMI Power Domain Protocol
-- [ ] SCMI System Power Protocol
-- [ ] SCMI Perf Protocol
-- [ ] SCMI Sensor Protocol
+| Protocol | ID | 状态 | 说明 |
+|----------|------|------|------|
+| Base | 0x10 | ✅ 完整 | 版本/属性/厂商识别 |
+| Clock | 0x11 | ✅ 完整 | 频率 Get/Set/Notify |
+| Power | 0x12 | ✅ 完整 | 电源域 On/Off/Suspend/Notify |
+| Perf | 0x13 | ✅ 完整 | DVFS + Limits |
+| I2C | 0x16 | ✅ 完整 | 总线读写传输 |
+| SPI | 0x17 | ✅ 完整 | Open/Transfer/Close |
+| Sensors | 0x15 | 🔲 待添加 | 传感器协议 |
+| SysPower | 0x14 | 🔲 待添加 | 系统电源管理 |
 
 ## 编译
 
@@ -87,19 +77,41 @@ make -C mygearvm/firmware PLAT=<soc>
 # 放入 kernel 源码目录后编译
 # CONFIG_SCMI_XLNX=m
 
-# Android virtio-scmi
+# Android virtio-scmi + 驱动
 # 放入 Android kernel 或 vendor 分支编译
 # CONFIG_VIRTIO_SCMI=y
+# CONFIG_SCMI_I2C_ADAPTER=m
+# CONFIG_SCMI_SPI_ADAPTER=m
+```
+
+## Android 驱动使用流程
+
+```
+应用/用户空间
+    │
+    ▼
+/dev/i2c-X  (i2c-dev)
+    │
+    ▼
+scmi_i2c_adapter.ko   ◄─── SCMI Clock protocol (开关/调速时钟)
+    │                  ◄─── SCMI I2C protocol (实际 I2C 传输)
+    │
+    ▼
+virtio_scmi.ko  ◄───── scmi_client.ko (同步事务管理)
+    │                    │
+    ▼                    ▼
+    ───────── virtqueue (A2P/P2A) ──────────►
+                   pvm Linux host
 ```
 
 ## TODO
 
-- [ ] Doorbell 驱动完整实现
-- [ ] mygearvm SCMI firmware 服务端
-- [ ] virtio-scmi host 端 (Linux kernel driver)
-- [ ] Android virtio-scmi guest 驱动
-- [ ] SCMI 协议族完整实现
+- [ ] Doorbell 驱动完整实现 (绑定真实寄存器地址)
+- [ ] mygearvm SCMI firmware 服务端完整实现
+- [ ] virtio-scmi host 端 (pvm Linux kernel driver)
+- [ ] Android virtio-scmi guest 驱动 (完成 virtqueue 集成)
 - [ ] 测试框架 / QEMU 仿真
+- [ ] Sensors / SysPower 协议
 
 ## 参考
 
